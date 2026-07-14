@@ -1,7 +1,7 @@
 {
-  "name": "vite-project",
+  "name": "navinocode",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.2.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,6 +9,8 @@
     "build:dev": "vite build --mode development",
     "build:extension": "node scripts/build-extension.js",
     "validate:extension": "node scripts/validate-extension.js",
+    "package:edge": "node scripts/package-edge.js",
+    "release:edge": "node scripts/package-edge.js --release",
     "generate-icons": "node scripts/generate-icons.js",
     "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview"

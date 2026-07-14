@@ -1,32 +1,37 @@
+import { spawnSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const iconsDir = path.join(__dirname, '..', 'public', 'icons');
+const sourceIcon = path.join(iconsDir, 'icon.png');
+const sizes = [16, 32, 48, 128];
 
-// Simple SVG to placeholder PNG generator
-// In production, you would replace these with actual PNG files
-const createPlaceholderPNG = (size, outputPath) => {
-  // Create a simple text-based placeholder for now
-  const placeholder = `// Placeholder for ${size}x${size} PNG icon
-// In production, replace this with an actual PNG file
-// Generated from SVG icon`;
-
-  fs.writeFileSync(outputPath, placeholder);
-  console.log(`Created placeholder: ${outputPath}`);
-};
-
-const iconsDir = path.join(__dirname, '../public/icons');
-
-// Ensure icons directory exists
-if (!fs.existsSync(iconsDir)) {
-  fs.mkdirSync(iconsDir, { recursive: true });
+if (!fs.existsSync(sourceIcon)) {
+  console.error(`Source icon is missing: ${sourceIcon}`);
+  process.exit(1);
 }
 
-// Create placeholder PNG files
-[16, 32, 48, 128].forEach(size => {
-  createPlaceholderPNG(size, path.join(iconsDir, `icon-${size}.png`));
-});
+const probe = spawnSync('ffmpeg', ['-version'], { stdio: 'ignore' });
+if (probe.error || probe.status !== 0) {
+  console.error('ffmpeg is required to generate extension icons.');
+  process.exit(1);
+}
 
-console.log('Icon generation completed. Replace placeholder files with actual PNG icons for production.');
+for (const size of sizes) {
+  const output = path.join(iconsDir, `icon-${size}.png`);
+  const result = spawnSync('ffmpeg', [
+    '-y',
+    '-loglevel', 'error',
+    '-i', sourceIcon,
+    '-vf', `scale=${size}:${size}:flags=lanczos`,
+    output,
+  ], { stdio: 'inherit' });
+  if (result.error || result.status !== 0) {
+    console.error(`Failed to generate ${size}x${size} icon.`);
+    process.exit(1);
+  }
+  console.log(`Generated ${path.relative(process.cwd(), output)} (${size}x${size})`);
+}

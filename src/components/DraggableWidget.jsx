@@ -124,6 +124,27 @@ const DraggableWidget = ({ id, defaultPos = { x: 24, y: 24 }, children }) => {
     }
   };
 
+  // 视口缩小时把已保存的位置重新约束到可见区域。
+  useEffect(() => {
+    const keepInViewport = () => {
+      if (!size.w || !size.h) return;
+      const padding = 8;
+      const next = {
+        x: Math.max(padding, Math.min(Math.max(padding, window.innerWidth - size.w - padding), posRef.current.x)),
+        y: Math.max(padding, Math.min(Math.max(padding, window.innerHeight - size.h - padding), posRef.current.y)),
+      };
+      if (next.x !== posRef.current.x || next.y !== posRef.current.y) {
+        setPos(next);
+        posRef.current = next;
+        savePos(next);
+      }
+    };
+
+    keepInViewport();
+    window.addEventListener('resize', keepInViewport);
+    return () => window.removeEventListener('resize', keepInViewport);
+  }, [id, size.w, size.h]);
+
   const onPointerDown = (e) => {
     // 避免在点击按钮/输入时开始拖拽
     const noDrag = e.target.closest('button, input, textarea, a, [data-no-drag]');
@@ -156,11 +177,11 @@ const DraggableWidget = ({ id, defaultPos = { x: 24, y: 24 }, children }) => {
     const W = window.innerWidth;
     const H = window.innerHeight;
     const padding = 8;
-    x = Math.max(padding, Math.min(W - padding, x));
-    y = Math.max(padding, Math.min(H - padding, y));
-  const next = { x, y };
-  setPos(next);
-  posRef.current = next;
+    x = Math.max(padding, Math.min(Math.max(padding, W - size.w - padding), x));
+    y = Math.max(padding, Math.min(Math.max(padding, H - size.h - padding), y));
+    const next = { x, y };
+    setPos(next);
+    posRef.current = next;
   };
 
   const onPointerUp = () => {
@@ -250,28 +271,6 @@ const DraggableWidget = ({ id, defaultPos = { x: 24, y: 24 }, children }) => {
   const onMouseLeave = () => {
     if (dockedSide && !isPinned) setIsExpanded(false);
   };
-
-  // 监听键盘事件，支持Tab快捷键
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      // 检查是否按下了Tab键
-      if (e.key === 'Tab') {
-        // 阻止默认行为（切换焦点）
-        e.preventDefault();
-        
-        // 切换固定状态
-        togglePin();
-      }
-    };
-
-    // 添加事件监听器
-    window.addEventListener('keydown', handleKeyDown);
-    
-    // 清理事件监听器
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [isPinned]);
 
   // 固定状态时，确保取消贴边并保持展开（防御式，防止早期副作用遗留）
   useEffect(() => {

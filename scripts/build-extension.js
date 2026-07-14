@@ -9,7 +9,7 @@ const __dirname = path.dirname(__filename);
 const buildDir = path.join(__dirname, '../build');
 const extensionDir = path.join(__dirname, '../extension');
 
-console.log('Building Chrome Extension...');
+console.log('Building Edge/Chromium extension...');
 
 // Clean previous builds
 if (fs.existsSync(buildDir)) {
@@ -100,10 +100,10 @@ if (fs.existsSync(fontsSource)) {
   copyDir(fontsSource, fontsDest);
 }
 
-console.log('✅ Chrome Extension build completed!');
-console.log(`📁 Extension ready in: ${extensionDir}`);
+console.log('Edge/Chromium extension build completed.');
+console.log(`Extension directory: ${extensionDir}`);
 console.log('\nTo install the extension:');
-console.log('1. Open Chrome and go to chrome://extensions/');
+console.log('1. Open Microsoft Edge and go to edge://extensions/');
 console.log('2. Enable "Developer mode"');
 console.log('3. Click "Load unpacked"');
 console.log(`4. Select the folder: ${extensionDir}`);

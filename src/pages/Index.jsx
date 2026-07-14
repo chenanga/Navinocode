@@ -4,12 +4,12 @@ import GitHubUsageHeatmap from '@/components/GitHubUsageHeatmap';
 import { PopoverContent, Popover, PopoverTrigger } from '@/components/ui/popover';
 import { Slider } from '@/components/ui/slider';
 import React, { useEffect, useRef, useState } from 'react';
-import { DialogContent, Dialog, DialogTrigger } from '@/components/ui/dialog';
+import { DialogContent, Dialog, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import TodoWidget from '@/components/TodoWidget';
 import DraggableWidget from '@/components/DraggableWidget';
 import { Input } from '@/components/ui/input';
-import { Globe, Search, X, Upload, Settings, RefreshCcw } from 'lucide-react';
+import { Download, Globe, Search, X, Upload, Settings, RefreshCcw } from 'lucide-react';
 import PomodoroTimer from '@/components/PomodoroTimer';
 import { recordUsageEvent } from '@/lib/usageEvents';
 import AppSelector from '@/components/AppSelector';
@@ -121,6 +121,9 @@ const Index = () => {
   const [activeSuggestIndex, setActiveSuggestIndex] = useState(-1);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [settingsSection, setSettingsSection] = useState('general');
+  const [themeMode, setThemeMode] = useState(() => localStorage.getItem('themeMode') || 'system');
+  const importConfigRef = useRef(null);
   const [backgroundImage, setBackgroundImage] = useState(() => {
     // 从localStorage读取背景图片
     return localStorage.getItem('backgroundImage') || '';
@@ -132,6 +135,10 @@ const Index = () => {
   const [backgroundBlur, setBackgroundBlur] = useState(() => {
     // 从localStorage读取模糊设置
     return parseInt(localStorage.getItem('backgroundBlur')) || 0;
+  });
+  const [backgroundOverlay, setBackgroundOverlay] = useState(() => {
+    const saved = parseInt(localStorage.getItem('backgroundOverlay'), 10);
+    return Number.isFinite(saved) ? saved : 24;
   });
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const [isEngineMenuOpen, setIsEngineMenuOpen] = useState(false);
@@ -229,6 +236,20 @@ const Index = () => {
     return () => clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-color-scheme: dark)');
+    const applyTheme = () => {
+      const isDark = themeMode === 'dark' || (themeMode === 'system' && media.matches);
+      document.documentElement.classList.toggle('dark', isDark);
+      document.documentElement.style.colorScheme = isDark ? 'dark' : 'light';
+    };
+
+    localStorage.setItem('themeMode', themeMode);
+    applyTheme();
+    media.addEventListener?.('change', applyTheme);
+    return () => media.removeEventListener?.('change', applyTheme);
+  }, [themeMode]);
+
   // 获取一言
   useEffect(() => {
     const fetchHitokoto = async () => {
@@ -262,6 +283,10 @@ const Index = () => {
   useEffect(() => {
     localStorage.setItem('backgroundBlur', backgroundBlur.toString());
   }, [backgroundBlur]);
+
+  useEffect(() => {
+    localStorage.setItem('backgroundOverlay', backgroundOverlay.toString());
+  }, [backgroundOverlay]);
 
   // 持久化搜索引擎设置
   useEffect(() => {
@@ -380,6 +405,12 @@ const Index = () => {
   };
 
   const normalizedQuery = (searchValue || '').trim();
+  const localAppMatches = normalizedQuery
+    ? apps.filter((app) => {
+        const query = normalizedQuery.toLowerCase();
+        return String(app?.name || '').toLowerCase().includes(query) || String(app?.url || '').toLowerCase().includes(query);
+      }).slice(0, 5)
+    : [];
   const localHistoryMatches = normalizedQuery
     ? searchHistory.filter((t) => t.toLowerCase().includes(normalizedQuery.toLowerCase())).slice(0, 5)
     : [];
@@ -387,6 +418,9 @@ const Index = () => {
   const mergedSuggestions = (() => {
     const seen = new Set();
     const out = [];
+    for (const app of localAppMatches) {
+      out.push({ value: String(app.name || app.url || '应用'), source: 'app', app });
+    }
     for (const t of localHistoryMatches) {
       const key = `h:${t}`;
       if (seen.has(key)) continue;
@@ -411,6 +445,23 @@ const Index = () => {
     }
     return dedup.slice(0, 8);
   })();
+
+  const activateSuggestion = (item) => {
+    if (item?.source === 'app' && item.app?.url) {
+      try {
+        const target = new URL(item.app.url);
+        if (!['http:', 'https:'].includes(target.protocol)) throw new Error('unsupported protocol');
+        recordUsageEvent('jump');
+        setIsSuggestOpen(false);
+        setSearchValue('');
+        window.open(target.href, '_blank', 'noopener,noreferrer');
+      } catch {
+        toast('该应用的网址无效，请先编辑应用');
+      }
+      return;
+    }
+    doSearch(item?.value);
+  };
 
   useEffect(() => {
     if (!isSearchFocused || !normalizedQuery) {
@@ -444,47 +495,24 @@ const Index = () => {
 
     const requestId = ++suggestionRequestIdRef.current;
 
-    const fetchBingSuggestionsJsonp = (query) => {
-      return new Promise((resolve, reject) => {
-        const callbackName = `__bing_suggest_cb_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
-        const script = document.createElement('script');
-        const timeoutId = setTimeout(() => {
-          cleanup();
-          reject(new Error('Bing suggestions timeout'));
-        }, 4500);
-
-        const cleanup = () => {
-          clearTimeout(timeoutId);
-          try {
-            delete window[callbackName];
-          } catch {
-            window[callbackName] = undefined;
-          }
-          script.remove();
-        };
-
-        window[callbackName] = (data) => {
-          cleanup();
-          resolve(data);
-        };
-
-        // OpenSearch JSONP 常见参数是 callback
-        script.src = `https://api.bing.com/osjson.aspx?query=${encodeURIComponent(query)}&callback=${encodeURIComponent(callbackName)}`;
-        script.async = true;
-        script.onerror = () => {
-          cleanup();
-          reject(new Error('Bing suggestions load error'));
-        };
-
-        document.body.appendChild(script);
-
-        // 允许外部主动取消
-        suggestionJsonpCleanupRef.current = cleanup;
-      });
+    const fetchBingSuggestions = async (query) => {
+      const controller = new AbortController();
+      const endpoint = import.meta.env.DEV
+        ? `/bing-suggest/osjson.aspx?query=${encodeURIComponent(query)}`
+        : `https://api.bing.com/osjson.aspx?query=${encodeURIComponent(query)}`;
+      const timeoutId = setTimeout(() => controller.abort(), 4500);
+      suggestionJsonpCleanupRef.current = () => controller.abort();
+      try {
+        const response = await fetch(endpoint, { signal: controller.signal });
+        if (!response.ok) throw new Error(`Bing suggestions HTTP ${response.status}`);
+        return await response.json();
+      } finally {
+        clearTimeout(timeoutId);
+      }
     };
     suggestionDebounceRef.current = setTimeout(async () => {
       try {
-        const json = await fetchBingSuggestionsJsonp(normalizedQuery);
+        const json = await fetchBingSuggestions(normalizedQuery);
         if (requestId !== suggestionRequestIdRef.current) return;
         const list = Array.isArray(json) && Array.isArray(json[1]) ? json[1] : [];
         setBingSuggestions(list.slice(0, 8));
@@ -675,6 +703,8 @@ const Index = () => {
     backgroundImage,
     backgroundBrightness,
     backgroundBlur,
+    backgroundOverlay,
+    themeMode,
     supabaseConfig.url,
     supabaseConfig.anonKey,
     supabaseSyncId,
@@ -691,6 +721,12 @@ const Index = () => {
     }
     if (typeof payload.backgroundBlur === 'number') {
       setBackgroundBlur(payload.backgroundBlur);
+    }
+    if (typeof payload.backgroundOverlay === 'number') {
+      setBackgroundOverlay(Math.max(0, Math.min(60, payload.backgroundOverlay)));
+    }
+    if (['system', 'light', 'dark'].includes(payload.themeMode)) {
+      setThemeMode(payload.themeMode);
     }
     if (payload.backgroundImage === null) {
       setBackgroundImage('');
@@ -754,7 +790,9 @@ const Index = () => {
         searchEngine,
         backgroundImage,
         backgroundBrightness,
-        backgroundBlur
+        backgroundBlur,
+        backgroundOverlay,
+        themeMode,
       };
       await pushCloudState(supabaseConfig, payload, undefined, syncId);
       const now = new Date().toISOString();
@@ -767,6 +805,56 @@ const Index = () => {
       if (!options.silent) toast(`上传失败：${error.message || '未知错误'}`);
     } finally {
       setIsSyncing(false);
+    }
+  };
+
+  const createConfigPayload = () => ({
+    apps,
+    todos,
+    componentSettings,
+    searchEngine,
+    backgroundImage,
+    backgroundBrightness,
+    backgroundBlur,
+    backgroundOverlay,
+    themeMode,
+    bottomCount: localStorage.getItem('bottomCount'),
+    widgetPositions: localStorage.getItem('widget_positions'),
+    widgetPins: localStorage.getItem('widget_pins'),
+  });
+
+  const handleExportConfig = () => {
+    const content = JSON.stringify({
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      data: createConfigPayload(),
+    }, null, 2);
+    const url = URL.createObjectURL(new Blob([content], { type: 'application/json' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `navinocode-config-${new Date().toISOString().slice(0, 10)}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImportConfig = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    try {
+      const parsed = JSON.parse(await file.text());
+      const payload = parsed?.data || parsed;
+      if (!payload || !Array.isArray(payload.apps) || !Array.isArray(payload.todos)) {
+        throw new Error('配置文件缺少 apps 或 todos');
+      }
+      applyCloudPayload(payload);
+      if (payload.bottomCount != null) localStorage.setItem('bottomCount', String(payload.bottomCount));
+      if (typeof payload.widgetPositions === 'string') localStorage.setItem('widget_positions', payload.widgetPositions);
+      if (typeof payload.widgetPins === 'string') localStorage.setItem('widget_pins', payload.widgetPins);
+      toast('配置已导入，正在刷新页面');
+      setTimeout(() => window.location.reload(), 500);
+    } catch (error) {
+      toast(`导入失败：${error.message || '文件格式不正确'}`);
     }
   };
 
@@ -791,9 +879,7 @@ const Index = () => {
         style={{
           backdropFilter: backdropFilterValue,
           WebkitBackdropFilter: backdropFilterValue,
-          backgroundColor: isSearchFocused 
-            ? 'rgba(0, 0, 0, 0.3)' 
-            : 'transparent'
+          background: `linear-gradient(180deg, rgba(0, 0, 0, ${Math.max(backgroundOverlay - 8, 0) / 100}), rgba(0, 0, 0, ${(isSearchFocused ? Math.max(backgroundOverlay, 36) : backgroundOverlay) / 100}))`,
         }}
       />
       
@@ -802,7 +888,7 @@ const Index = () => {
         {/* 主搜索区域 */}
         <div className="flex-grow flex flex-col items-center justify-center px-4">
           <div className="w-full max-w-2xl">
-            <h1 className="text-4xl md:text-5xl font-bold text-center mb-8 text-gray-800 dark:text-white">
+            <h1 className="text-4xl md:text-5xl font-bold text-center mb-8 text-white drop-shadow-[0_2px_12px_rgba(0,0,0,0.55)]">
               {getFormattedTime()}
             </h1>
             
@@ -958,9 +1044,7 @@ const Index = () => {
                     if (e.key === 'Enter' && activeSuggestIndex >= 0) {
                       e.preventDefault();
                       const picked = mergedSuggestions[activeSuggestIndex];
-                      if (picked?.value) {
-                        doSearch(picked.value);
-                      }
+                      if (picked?.value) activateSuggestion(picked);
                     }
                   }}
                   onPointerDown={() => {
@@ -1032,7 +1116,7 @@ const Index = () => {
                               e.preventDefault();
                             }}
                             onMouseEnter={() => setActiveSuggestIndex(idx)}
-                            onClick={() => doSearch(item.value)}
+                            onClick={() => activateSuggestion(item)}
                           >
                             <span className="flex-1 truncate">{item.value}</span>
                             <span
@@ -1042,7 +1126,7 @@ const Index = () => {
                                   : 'border-gray-200/60 dark:border-gray-700/60 text-gray-600 dark:text-gray-300'
                               }`}
                             >
-                              {item.source === 'history' ? '历史' : 'Bing'}
+                              {item.source === 'app' ? '应用' : item.source === 'history' ? '历史' : 'Bing'}
                             </span>
                           </button>
                         );
@@ -1081,40 +1165,60 @@ const Index = () => {
             <Button
               variant="outline"
               size="icon"
-              className="fixed top-6 right-6 rounded-full w-10 h-10 p-0 apple-button z-10 transition-all duration-300 opacity-30 hover:opacity-100"
+              className="fixed top-6 right-6 rounded-full w-10 h-10 p-0 apple-button z-10 transition-all duration-300 opacity-70 hover:opacity-100"
+              aria-label="打开设置"
             >
               <Settings className="h-5 w-5 text-gray-700 dark:text-gray-300" />
             </Button>
           </DialogTrigger>
           <DialogContent className="max-w-md p-6 rounded-2xl apple-popover max-h-[80vh] flex flex-col w-[calc(100vw-2rem)] max-w-sm sm:max-w-md">
             {/* 固定标题 - 不滚动 */}
-            <h2 className="text-xl font-bold pb-3 border-b border-gray-200/50 dark:border-gray-800/50">设置</h2>
+            <DialogTitle className="text-xl font-bold">设置</DialogTitle>
+            <div className="grid grid-cols-4 gap-1 rounded-2xl bg-black/5 dark:bg-white/10 p-1" aria-label="设置分类">
+              {[
+                ['general', '常规'],
+                ['appearance', '外观'],
+                ['data', '数据'],
+                ['about', '关于'],
+              ].map(([id, label]) => (
+                <Button
+                  key={id}
+                  type="button"
+                  variant="ghost"
+                  className={`h-9 rounded-xl px-2 text-xs sm:text-sm ${settingsSection === id ? 'bg-white/80 shadow-sm dark:bg-black/40' : ''}`}
+                  onClick={() => setSettingsSection(id)}
+                  aria-pressed={settingsSection === id}
+                >
+                  {label}
+                </Button>
+              ))}
+            </div>
 
             {/* 滚动内容区域 */}
-            <div className="overflow-y-auto flex-grow pr-2" style={{
+            <div className="settings-scroll overflow-y-auto flex-grow pr-2" style={{
               scrollbarWidth: 'thin',
               scrollbarColor: 'rgba(156, 163, 175, 0.5) transparent'
             }}>
               <style>
                 {`
-                  .overflow-y-auto::-webkit-scrollbar {
+                  .settings-scroll::-webkit-scrollbar {
                     width: 6px;
                   }
-                  .overflow-y-auto::-webkit-scrollbar-track {
+                  .settings-scroll::-webkit-scrollbar-track {
                     background: transparent;
                   }
-                  .overflow-y-auto::-webkit-scrollbar-thumb {
+                  .settings-scroll::-webkit-scrollbar-thumb {
                     background-color: rgba(156, 163, 175, 0.5);
                     border-radius: 3px;
                   }
-                  .overflow-y-auto::-webkit-scrollbar-thumb:hover {
+                  .settings-scroll::-webkit-scrollbar-thumb:hover {
                     background-color: rgba(156, 163, 175, 0.7);
                   }
                 `}
               </style>
               
               {/* 组件设置 */}
-              <div className="mt-4">
+              <div className={settingsSection === 'general' ? 'mt-4' : 'hidden'}>
                 <Label className="text-sm font-medium">组件设置</Label>
                 <Card className="mt-2 rounded-2xl overflow-hidden">
                   <CardContent className="p-0">
@@ -1122,6 +1226,8 @@ const Index = () => {
                       variant="ghost"
                       className="w-full justify-between rounded-none h-12 px-4 py-2 text-left"
                       onClick={() => toggleComponent('pomodoro')}
+                      role="switch"
+                      aria-checked={componentSettings.pomodoro}
                     >
                       <span>番茄钟</span>
                       <div className={`w-10 h-5 rounded-full p-0.5 transition-colors ${componentSettings.pomodoro ? 'bg-blue-500' : 'bg-gray-300'}`}>
@@ -1132,6 +1238,8 @@ const Index = () => {
                       variant="ghost"
                       className="w-full justify-between rounded-none h-12 px-4 py-2 text-left border-t border-gray-100/20 dark:border-gray-800/50"
                       onClick={() => toggleComponent('heatmap')}
+                      role="switch"
+                      aria-checked={componentSettings.heatmap}
                     >
                       <span>使用热力图</span>
                       <div className={`w-10 h-5 rounded-full p-0.5 transition-colors ${componentSettings.heatmap ? 'bg-blue-500' : 'bg-gray-300'}`}>
@@ -1142,6 +1250,8 @@ const Index = () => {
                       variant="ghost"
                       className="w-full justify-between rounded-none h-12 px-4 py-2 text-left border-t border-gray-100/20 dark:border-gray-800/50"
                       onClick={() => toggleComponent('todo')}
+                      role="switch"
+                      aria-checked={componentSettings.todo}
                     >
                       <span>待办事项</span>
                       <div className={`w-10 h-5 rounded-full p-0.5 transition-colors ${componentSettings.todo ? 'bg-blue-500' : 'bg-gray-300'}`}>
@@ -1152,8 +1262,28 @@ const Index = () => {
                 </Card>
               </div>
 
+              <div className={settingsSection === 'data' ? 'mt-4' : 'hidden'}>
+                <Label className="text-sm font-medium">本地备份</Label>
+                <Card className="mt-2 rounded-2xl">
+                  <CardContent className="p-4">
+                    <p className="mb-3 text-xs leading-relaxed text-gray-600 dark:text-gray-400">
+                      导出应用、待办、外观和组件布局；文件不包含 Supabase URL 或 anon key。
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <Button type="button" variant="secondary" className="rounded-2xl" onClick={handleExportConfig}>
+                        <Download className="mr-2 h-4 w-4" />导出配置
+                      </Button>
+                      <Button type="button" variant="outline" className="rounded-2xl" onClick={() => importConfigRef.current?.click()}>
+                        <Upload className="mr-2 h-4 w-4" />导入配置
+                      </Button>
+                      <input ref={importConfigRef} type="file" accept="application/json,.json" className="hidden" onChange={handleImportConfig} />
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
               {/* 云同步 */}
-              <div className="mt-6">
+              <div className={settingsSection === 'data' ? 'mt-6' : 'hidden'}>
                 <Label className="text-sm font-medium">云同步（Supabase 直连）</Label>
                 <Card className="mt-2 rounded-2xl overflow-hidden">
                   <CardContent className="p-4 space-y-3">
@@ -1231,7 +1361,7 @@ const Index = () => {
               </div>
               
               {/* 搜索引擎设置 */}
-              <div className="mt-6">
+              <div className={settingsSection === 'general' ? 'mt-6' : 'hidden'}>
                 <Label className="text-sm font-medium">搜索引擎</Label>
                 <Card className="mt-2 rounded-2xl overflow-hidden">
                   <CardContent className="p-0">
@@ -1259,8 +1389,29 @@ const Index = () => {
                 </Card>
               </div>
               
+              <div className={settingsSection === 'appearance' ? 'mt-4' : 'hidden'}>
+                <Label className="text-sm font-medium">主题</Label>
+                <div className="mt-2 grid grid-cols-3 gap-2">
+                  {[
+                    ['system', '跟随系统'],
+                    ['light', '浅色'],
+                    ['dark', '深色'],
+                  ].map(([id, label]) => (
+                    <Button
+                      key={id}
+                      type="button"
+                      variant={themeMode === id ? 'secondary' : 'outline'}
+                      className="rounded-2xl px-2"
+                      onClick={() => setThemeMode(id)}
+                    >
+                      {label}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+
               {/* 背景图片设置 */}
-              <div className="mt-6">
+              <div className={settingsSection === 'appearance' ? 'mt-6' : 'hidden'}>
                 <Label className="text-sm font-medium">背景图片</Label>
                 {!backgroundImage ? (
                   <div 
@@ -1332,7 +1483,7 @@ const Index = () => {
               </div>
               
               {/* 亮度设置 */}
-              <div className="mt-6">
+              <div className={settingsSection === 'appearance' ? 'mt-6' : 'hidden'}>
                 <Label className="text-sm font-medium">背景亮度: {backgroundBrightness}%</Label>
                 <Slider
                   value={[backgroundBrightness]}
@@ -1345,7 +1496,7 @@ const Index = () => {
               </div>
               
               {/* 磨砂效果设置 */}
-              <div className="mt-6">
+              <div className={settingsSection === 'appearance' ? 'mt-6' : 'hidden'}>
                 <Label className="text-sm font-medium">磨砂效果: {backgroundBlur}px</Label>
                 <Slider
                   value={[backgroundBlur]}
@@ -1356,10 +1507,22 @@ const Index = () => {
                   className="mt-2"
                 />
               </div>
+
+              <div className={settingsSection === 'appearance' ? 'mt-6' : 'hidden'}>
+                <Label className="text-sm font-medium">背景遮罩: {backgroundOverlay}%</Label>
+                <Slider
+                  value={[backgroundOverlay]}
+                  onValueChange={(value) => setBackgroundOverlay(value[0])}
+                  min={0}
+                  max={60}
+                  step={1}
+                  className="mt-2"
+                />
+              </div>
             </div>
 
             {/* 关于项目部分 - 固定在底部，不滚动 */}
-            <div className="pt-4 mt-4 border-t border-gray-200 dark:border-gray-800">
+            <div className={settingsSection === 'about' ? 'pt-4 border-t border-gray-200 dark:border-gray-800' : 'hidden'}>
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-2">
                   <svg 

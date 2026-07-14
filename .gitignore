@@ -3,3 +3,5 @@ package-lock.json
 build
 .claude/
 extension/
+.serena/
+releases/

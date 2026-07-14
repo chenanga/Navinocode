@@ -1,52 +1,31 @@
 {
   "manifest_version": 3,
   "name": "Navinocode",
-  "version": "1.0.0",
-  "description": "A modern customizable start page with Apple-inspired design",
+  "version": "1.2.1",
+  "description": "一个可自定义的新标签页，集成多引擎搜索、快捷应用、待办、番茄钟、主题背景与可选云同步。",
   "author": "Navinocode Team",
   "homepage_url": "https://github.com/y-shi23/Navinocode",
   "chrome_url_overrides": {
     "newtab": "index.html"
   },
   "permissions": [
-    "storage",
     "unlimitedStorage"
   ],
   "host_permissions": [
     "https://*.supabase.co/*",
     "https://*.supabase.in/*",
     "https://*.supabase.net/*",
-    "https://*.nocode.cn/*",
-    "https://source.unsplash.com/*",
     "https://api.github.com/*",
-    "https://v1.jinrishici.com/*",
-    "https://www.googleapis.com/*",
-    "https://gstatic.com/*",
-    "https://fonts.googleapis.com/*",
-    "https://fonts.gstatic.com/*"
+    "https://api.bing.com/*",
+    "https://v1.hitokoto.cn/*"
   ],
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https:; connect-src 'self' https://*.supabase.co https://*.supabase.in https://*.supabase.net https://*.nocode.cn https://source.unsplash.com https://api.github.com https://v1.jinrishici.com"
-  },
-  "action": {
-    "default_title": "Open Navinocode",
-    "default_icon": {
-      "16": "icons/icon-16.png",
-      "32": "icons/icon-32.png",
-      "48": "icons/icon-48.png",
-      "128": "icons/icon-128.png"
-    }
+    "extension_pages": "script-src 'self'; object-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: https:; connect-src 'self' https://*.supabase.co https://*.supabase.in https://*.supabase.net https://api.github.com https://api.bing.com https://v1.hitokoto.cn"
   },
   "icons": {
     "16": "icons/icon-16.png",
     "32": "icons/icon-32.png",
     "48": "icons/icon-48.png",
     "128": "icons/icon-128.png"
-  },
-  "web_accessible_resources": [
-    {
-      "resources": ["assets/*", "fonts/*"],
-      "matches": ["<all_urls>"]
-    }
-  ]
+  }
 }

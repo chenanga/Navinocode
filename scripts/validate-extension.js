@@ -4,82 +4,104 @@ import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const rootDir = path.resolve(__dirname, '..');
+const extensionDir = path.join(rootDir, 'extension');
+const packageJson = JSON.parse(fs.readFileSync(path.join(rootDir, 'package.json'), 'utf8'));
 
-const extensionDir = path.join(__dirname, '../extension');
+let allValid = true;
 
-console.log('🔍 Validating Chrome Extension...\n');
+const check = (condition, success, failure) => {
+  console.log(`  ${condition ? 'PASS' : 'FAIL'} ${condition ? success : failure}`);
+  if (!condition) allValid = false;
+};
 
-// Check required files
+const isValidVersion = (version) => {
+  if (typeof version !== 'string' || !/^(0|[1-9]\d*)(\.(0|[1-9]\d*)){0,3}$/.test(version)) return false;
+  return version.split('.').every((part) => Number(part) <= 65535);
+};
+
+const listFiles = (directory, prefix = '') => {
+  if (!fs.existsSync(directory)) return [];
+  return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const relativePath = path.posix.join(prefix, entry.name);
+    return entry.isDirectory()
+      ? listFiles(path.join(directory, entry.name), relativePath)
+      : [relativePath];
+  });
+};
+
+const readPngSize = (filePath) => {
+  const buffer = fs.readFileSync(filePath);
+  const isPng = buffer.length >= 24 && buffer.subarray(1, 4).toString('ascii') === 'PNG';
+  if (!isPng) return null;
+  return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };
+};
+
+console.log('Validating Edge/Chromium extension package');
+
 const requiredFiles = [
   'manifest.json',
   'index.html',
   'assets/popup.js',
-  'assets/popup.css'
+  'assets/popup.css',
 ];
 
-let allValid = true;
+console.log('\nRequired files:');
+for (const file of requiredFiles) {
+  check(fs.existsSync(path.join(extensionDir, file)), file, `${file} is missing`);
+}
 
-console.log('📁 Checking required files:');
-requiredFiles.forEach(file => {
-  const filePath = path.join(extensionDir, file);
-  const exists = fs.existsSync(filePath);
-  console.log(`  ${exists ? '✅' : '❌'} ${file}`);
-  if (!exists) allValid = false;
-});
-
-// Check manifest.json
-console.log('\n📋 Validating manifest.json:');
+let manifest = null;
+console.log('\nManifest:');
 try {
-  const manifestPath = path.join(extensionDir, 'manifest.json');
-  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  manifest = JSON.parse(fs.readFileSync(path.join(extensionDir, 'manifest.json'), 'utf8'));
+  check(manifest.manifest_version === 3, 'Manifest V3', 'manifest_version must be 3');
+  check(Boolean(manifest.name?.trim()), `Name: ${manifest.name}`, 'name is required');
+  check(Boolean(manifest.description?.trim()), 'Description is present', 'description is required for the store listing');
+  check((manifest.description?.length || 0) <= 132, 'Description length is valid', 'description must not exceed 132 characters');
+  check(isValidVersion(manifest.version), `Version: ${manifest.version}`, 'version must contain one to four integers from 0 to 65535');
+  check(/^\d+\.\d+\.\d+$/.test(manifest.version || ''), 'Version follows the project x.y.z convention', 'project releases must use an x.y.z version');
+  check(manifest.version === packageJson.version, 'package.json version matches manifest', `package.json version ${packageJson.version} does not match manifest ${manifest.version}`);
+  check(Boolean(manifest.chrome_url_overrides?.newtab), `New tab: ${manifest.chrome_url_overrides?.newtab}`, 'chrome_url_overrides.newtab is required');
+  check(!manifest.update_url, 'No external update_url', 'store releases must not define an external update_url');
 
-  console.log(`  ✅ Name: ${manifest.name}`);
-  console.log(`  ✅ Version: ${manifest.version}`);
-  console.log(`  ✅ Manifest Version: ${manifest.manifest_version}`);
-  console.log(`  ✅ New Tab Override: ${manifest.chrome_url_overrides?.newtab}`);
-
-  if (manifest.manifest_version !== 3) {
-    console.log('  ❌ Should use manifest_version 3');
-    allValid = false;
+  const iconEntries = ['16', '32', '48', '128'].map((size) => [Number(size), manifest.icons?.[size]]).filter(([, iconPath]) => Boolean(iconPath));
+  check(iconEntries.length === 4, 'Required icon sizes are declared', 'icons 16, 32, 48, and 128 must be declared');
+  for (const [expectedSize, iconPath] of iconEntries) {
+    check(fs.existsSync(path.join(extensionDir, iconPath)), `Icon exists: ${iconPath}`, `icon is missing: ${iconPath}`);
+    if (fs.existsSync(path.join(extensionDir, iconPath))) {
+      const dimensions = readPngSize(path.join(extensionDir, iconPath));
+      check(
+        dimensions?.width === expectedSize && dimensions?.height === expectedSize,
+        `Icon dimensions: ${iconPath} (${expectedSize}x${expectedSize})`,
+        `${iconPath} must be a ${expectedSize}x${expectedSize} PNG`,
+      );
+    }
   }
 
-  if (!manifest.chrome_url_overrides?.newtab) {
-    console.log('  ❌ Missing newtab override');
-    allValid = false;
-  }
+  const csp = manifest.content_security_policy?.extension_pages || '';
+  check(csp.includes("script-src 'self'"), "CSP limits scripts to 'self'", "extension_pages CSP must include script-src 'self'");
+  check(!/script-src[^;]*https?:/i.test(csp), 'CSP does not allow remote scripts', 'remote script origins are not allowed');
 
+  const hostPermissions = manifest.host_permissions || [];
+  check(hostPermissions.every((permission) => permission.startsWith('https://')), 'Host permissions use HTTPS', 'all host permissions must use HTTPS');
 } catch (error) {
-  console.log(`  ❌ Invalid manifest.json: ${error.message}`);
-  allValid = false;
+  check(false, '', `manifest.json is invalid: ${error.message}`);
 }
 
-// Check HTML file
-console.log('\n📄 Validating HTML:');
+console.log('\nHTML and generated files:');
 try {
-  const htmlPath = path.join(extensionDir, 'index.html');
-  const html = fs.readFileSync(htmlPath, 'utf8');
-
-  const hasRoot = html.includes('id="root"');
-  const hasRelativePaths = !html.includes('src="/assets/') && !html.includes('href="/assets/');
-
-  console.log(`  ${hasRoot ? '✅' : '❌'} Contains root element`);
-  console.log(`  ${hasRelativePaths ? '✅' : '❌'} Uses relative asset paths`);
-
-  if (!hasRoot || !hasRelativePaths) {
-    allValid = false;
-  }
-
+  const html = fs.readFileSync(path.join(extensionDir, 'index.html'), 'utf8');
+  check(html.includes('id="root"'), 'Root element exists', 'index.html must contain id="root"');
+  check(!html.includes('src="/assets/') && !html.includes('href="/assets/'), 'Asset paths are relative', 'absolute /assets paths are not valid in the package');
+  check(!/<script[^>]+src=["']https?:/i.test(html), 'No remote scripts in HTML', 'remote scripts are not allowed in extension HTML');
 } catch (error) {
-  console.log(`  ❌ Invalid HTML file: ${error.message}`);
-  allValid = false;
+  check(false, '', `index.html is invalid: ${error.message}`);
 }
 
-console.log('\n' + (allValid ? '✅ Extension validation passed!' : '❌ Extension validation failed!'));
+const generatedFiles = listFiles(extensionDir);
+check(!generatedFiles.some((file) => file.endsWith('.map')), 'No source maps in release package', 'source maps must be removed from the release package');
+check(!generatedFiles.some((file) => file === '.env' || file.startsWith('.env.')), 'No environment files in release package', 'environment files must not be packaged');
 
-if (allValid) {
-  console.log('\n🚀 Ready to install!');
-  console.log('1. Open Chrome and go to chrome://extensions/');
-  console.log('2. Enable "Developer mode"');
-  console.log('3. Click "Load unpacked"');
-  console.log(`4. Select: ${extensionDir}`);
-}
+console.log(`\n${allValid ? 'Extension validation passed.' : 'Extension validation failed.'}`);
+if (!allValid) process.exit(1);

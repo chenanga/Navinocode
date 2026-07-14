@@ -181,3 +181,11 @@ releases/             Edge 商店 ZIP、校验和与构建元数据
 ```text
 https://github.com/y-shi23/Navinocode/blob/main/PRIVACY.md
 ```
+
+## 项目来源与许可证
+
+本项目基于 [XuYouo/Navinocode](https://github.com/XuYouo/Navinocode) 开发，并在其基础上持续进行功能优化、兼容性改进和 Microsoft Edge 扩展维护。维护者此前曾向原项目提交改进 PR；由于上游的 Edge 扩展版本长期未更新，本仓库继续完善扩展功能、隐私控制、版本管理和 Edge 商店发布流程。
+
+本项目是独立维护版本，并非上游项目的官方发布版本。感谢原作者及所有贡献者提供的设计与代码基础。
+
+项目依据 [MIT License](./LICENSE) 发布。使用、修改或分发本项目时，请同时保留许可证中要求的版权声明和许可声明。

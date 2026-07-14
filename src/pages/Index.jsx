@@ -116,6 +116,9 @@ const Index = () => {
     }
   });
   const [bingSuggestions, setBingSuggestions] = useState([]);
+  const [onlineSuggestionsEnabled, setOnlineSuggestionsEnabled] = useState(
+    () => localStorage.getItem('onlineSuggestionsEnabled') === 'true'
+  );
   const [isSuggestOpen, setIsSuggestOpen] = useState(false);
   const [isSuggestLoading, setIsSuggestLoading] = useState(false);
   const [activeSuggestIndex, setActiveSuggestIndex] = useState(-1);
@@ -293,6 +296,10 @@ const Index = () => {
     localStorage.setItem('searchEngine', searchEngine);
   }, [searchEngine]);
 
+  useEffect(() => {
+    localStorage.setItem('onlineSuggestionsEnabled', onlineSuggestionsEnabled ? 'true' : 'false');
+  }, [onlineSuggestionsEnabled]);
+
   // 持久化组件设置
   useEffect(() => {
     localStorage.setItem('componentSettings', JSON.stringify(componentSettings));
@@ -427,7 +434,7 @@ const Index = () => {
       seen.add(key);
       out.push({ value: t, source: 'history' });
     }
-    for (const t of bingSuggestions) {
+    for (const t of onlineSuggestionsEnabled ? bingSuggestions : []) {
       if (typeof t !== 'string') continue;
       const key = `s:${t}`;
       if (seen.has(key)) continue;
@@ -482,16 +489,24 @@ const Index = () => {
 
     setIsSuggestOpen(true);
     setActiveSuggestIndex(-1);
-    setIsSuggestLoading(true);
 
     if (suggestionDebounceRef.current) {
       clearTimeout(suggestionDebounceRef.current);
+      suggestionDebounceRef.current = null;
     }
 
     if (suggestionJsonpCleanupRef.current) {
       suggestionJsonpCleanupRef.current();
       suggestionJsonpCleanupRef.current = null;
     }
+
+    if (!onlineSuggestionsEnabled) {
+      setBingSuggestions([]);
+      setIsSuggestLoading(false);
+      return;
+    }
+
+    setIsSuggestLoading(true);
 
     const requestId = ++suggestionRequestIdRef.current;
 
@@ -537,7 +552,7 @@ const Index = () => {
       }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [normalizedQuery, isSearchFocused]);
+  }, [normalizedQuery, isSearchFocused, onlineSuggestionsEnabled]);
 
   // 获取格式化时间
   const getFormattedTime = () => {
@@ -700,6 +715,7 @@ const Index = () => {
     todos,
     componentSettings,
     searchEngine,
+    onlineSuggestionsEnabled,
     backgroundImage,
     backgroundBrightness,
     backgroundBlur,
@@ -716,6 +732,9 @@ const Index = () => {
     if (Array.isArray(payload.todos)) setTodos(payload.todos);
     if (payload.componentSettings) setComponentSettings(payload.componentSettings);
     if (typeof payload.searchEngine === 'string') setSearchEngine(payload.searchEngine);
+    if (typeof payload.onlineSuggestionsEnabled === 'boolean') {
+      setOnlineSuggestionsEnabled(payload.onlineSuggestionsEnabled);
+    }
     if (typeof payload.backgroundBrightness === 'number') {
       setBackgroundBrightness(payload.backgroundBrightness);
     }
@@ -788,6 +807,7 @@ const Index = () => {
         todos,
         componentSettings,
         searchEngine,
+        onlineSuggestionsEnabled,
         backgroundImage,
         backgroundBrightness,
         backgroundBlur,
@@ -813,6 +833,7 @@ const Index = () => {
     todos,
     componentSettings,
     searchEngine,
+    onlineSuggestionsEnabled,
     backgroundImage,
     backgroundBrightness,
     backgroundBlur,
@@ -1257,6 +1278,32 @@ const Index = () => {
                       <div className={`w-10 h-5 rounded-full p-0.5 transition-colors ${componentSettings.todo ? 'bg-blue-500' : 'bg-gray-300'}`}>
                         <div className={`w-4 h-4 rounded-full bg-white transform transition-transform ${componentSettings.todo ? 'translate-x-5' : ''}`} />
                       </div>
+                    </Button>
+                  </CardContent>
+                </Card>
+              </div>
+
+              <div className={settingsSection === 'general' ? 'mt-6' : 'hidden'}>
+                <Label className="text-sm font-medium">搜索建议</Label>
+                <Card className="mt-2 overflow-hidden rounded-2xl">
+                  <CardContent className="p-0">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="h-auto min-h-16 w-full justify-between rounded-none px-4 py-3 text-left"
+                      onClick={() => setOnlineSuggestionsEnabled((enabled) => !enabled)}
+                      role="switch"
+                      aria-checked={onlineSuggestionsEnabled}
+                    >
+                      <span className="min-w-0 pr-4">
+                        <span className="block font-medium">在线搜索建议</span>
+                        <span className="mt-1 block whitespace-normal text-xs font-normal leading-relaxed text-gray-600 dark:text-gray-400">
+                          开启后，输入内容会发送至 Bing 获取搜索建议
+                        </span>
+                      </span>
+                      <span className={`w-10 shrink-0 rounded-full p-0.5 transition-colors ${onlineSuggestionsEnabled ? 'bg-blue-500' : 'bg-gray-300'}`}>
+                        <span className={`block h-4 w-4 rounded-full bg-white transition-transform ${onlineSuggestionsEnabled ? 'translate-x-5' : ''}`} />
+                      </span>
                     </Button>
                   </CardContent>
                 </Card>
